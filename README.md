@@ -1,5 +1,7 @@
 # Claude Code 텔레그램 리모컨
 
+**[English](README.en.md)** | 한국어
+
 외출 중에도 스마트폰 텔레그램에서 Mac/Linux에 돌아가는 Claude Code CLI를 직접 제어하는 경량 봇.
 
 - 슬래시 명령(`/ship`, `/compact`, `/cost` 등) 네이티브 주입
