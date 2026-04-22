@@ -12,11 +12,61 @@
 
 ## 요구사항
 
-- macOS (launchd) 또는 Linux with systemd (WSL2도 Linux 경로로 작동)
+- macOS (launchd) 또는 Linux with systemd
+- **Windows: 네이티브 미지원. [WSL2](#windows-wsl2-안내) 안에서 Linux 경로로 사용**
 - `python3`, `curl`, **`tmux` (필수)**
 - 텔레그램 계정
 
 > **⚠️ tmux는 이 도구의 핵심 전제조건.** 봇은 tmux의 `send-keys`로 Claude Code가 돌아가는 pane에 키 시퀀스와 슬래시 명령을 주입함. tmux 없이 실행 중인 Claude Code는 제어 불가능 — 네이티브 터미널 창은 외부 프로세스가 키를 꽂을 방법이 없음.
+
+---
+
+## Windows (WSL2) 안내
+
+네이티브 Windows는 미지원 — tmux / launchd / systemd 셋 다 없기 때문. 대신 **WSL2(Windows Subsystem for Linux 2)** 안에서 리눅스용 설치 경로를 그대로 따라가면 됨.
+
+### WSL2 = 뭐?
+
+Microsoft 공식 기능. Windows 안에서 진짜 리눅스(기본 Ubuntu)를 돌리는 가상 환경. 설치 한 줄, 무료.
+
+### WSL2 설치 (PowerShell 관리자 권한)
+
+```powershell
+wsl --install
+```
+
+- Windows 10 (빌드 19041+) 또는 Windows 11 필요
+- 재부팅 한 번 후 Ubuntu 터미널 자동 실행 → 사용자명/비밀번호 설정
+- 이후 시작 메뉴에서 "Ubuntu" 실행하면 리눅스 셸 진입
+
+### WSL2 안에서 우리 리모컨 설치
+
+Ubuntu 터미널 안에서 **리눅스 경로 그대로** 실행:
+
+```bash
+sudo apt update && sudo apt install -y python3 curl tmux git
+git clone https://github.com/etinpres/claude-code-telegram-remote.git \
+  ~/.claude/channels/telegram
+cd ~/.claude/channels/telegram
+./install.sh
+```
+
+install.sh가 자동으로 systemd --user 서비스로 등록함.
+
+### Claude Code도 WSL2 안에서 실행
+
+Windows CMD / PowerShell이 아니라 **Ubuntu 터미널 → tmux 세션 → claude** 순서로 실행해야 봇이 제어 가능.
+
+```bash
+tmux new -s cc
+claude   # WSL2 Ubuntu 안에서
+```
+
+### 주의사항
+
+- WSL2는 기본적으로 Windows 로그아웃하면 꺼짐. `loginctl enable-linger`로 유지 가능(install.sh가 시도하지만 WSL2에선 효과 제한적) — **사실상 Windows 로그인 유지 + Ubuntu 터미널 하나 띄워놓는 게 가장 확실**.
+- `/screenshot`은 WSL2에선 Linux 도구(`grim` 등) 설치해도 WSL2엔 디스플레이 서버가 없어서 캡처 불가. `/screen`/`/tail`(텍스트)은 정상 작동.
+- 성능 팁: 코드 저장소는 WSL2 파일시스템(`~/`)에 두고 작업. Windows 드라이브(`/mnt/c/...`)는 I/O 느림.
 
 ---
 
