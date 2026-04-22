@@ -13,8 +13,56 @@
 ## 요구사항
 
 - macOS (launchd) 또는 Linux with systemd (WSL2도 Linux 경로로 작동)
-- `python3`, `curl`, `tmux` 설치
+- `python3`, `curl`, **`tmux` (필수)**
 - 텔레그램 계정
+
+> **⚠️ tmux는 이 도구의 핵심 전제조건.** 봇은 tmux의 `send-keys`로 Claude Code가 돌아가는 pane에 키 시퀀스와 슬래시 명령을 주입함. tmux 없이 실행 중인 Claude Code는 제어 불가능 — 네이티브 터미널 창은 외부 프로세스가 키를 꽂을 방법이 없음.
+
+---
+
+## tmux 설치 + 세션 세팅
+
+### tmux 설치
+
+| OS | 명령 |
+|----|------|
+| macOS (Homebrew) | `brew install tmux` |
+| Ubuntu / Debian / WSL2 | `sudo apt update && sudo apt install -y tmux` |
+| Fedora / RHEL | `sudo dnf install -y tmux` |
+| Arch | `sudo pacman -S tmux` |
+
+설치 확인: `tmux -V` → `tmux 3.x` 출력.
+
+### Claude Code를 tmux 안에서 실행
+
+네이티브 터미널에서 바로 `claude` 하지 말고 **항상 tmux 세션 안에서** 실행:
+
+```bash
+tmux new -s cc     # "cc" 이름의 새 세션 생성, 그 안에 들어감
+claude             # 이제 Claude Code가 tmux pane에서 돌아감
+```
+
+세션 분리(나가되 계속 실행): `Ctrl-b` → `d`
+재접속: `tmux attach -t cc`
+
+### TMUX_TARGET 값 찾기
+
+`.env`에 적을 `TMUX_TARGET` 값은 `session:window.pane` 형식:
+
+```bash
+tmux list-panes -a
+```
+
+출력 예:
+```
+cc:0.0: [80x24] [history 0/2000, 0 bytes] %2 (active)
+```
+
+→ 복사할 값: `cc:0.0`
+
+세션/윈도우/페인 하나만 있으면 보통 `0:0.0` 같은 단순한 값이 나옴.
+
+> **팁**: tmux 창을 닫거나 세션을 종료하면 `TMUX_TARGET`이 사라져 봇 명령이 전부 실패함. 데몬은 매번 `tmux send-keys`에 대상을 명시하기 때문에 tmux 세션이 살아있어야 함. macOS에선 로그아웃해도 tmux는 유지되고, Linux는 `loginctl enable-linger`를 install.sh가 자동 처리.
 
 ---
 
@@ -48,7 +96,7 @@ TMUX_TARGET=0:0.0                             # Claude Code가 돌아가는 tmux
 ALLOWED_USER_IDS=123456789                    # 본인 user ID (콤마로 여러 명)
 ```
 
-`TMUX_TARGET` 찾는 법: Claude Code를 tmux 안에서 실행 중인 상태에서 `tmux list-panes -a` → `session:window.pane` 형식 복사.
+`TMUX_TARGET` 찾는 법은 위 **"tmux 설치 + 세션 세팅"** 섹션 참고.
 
 다시 `./install.sh` 실행 → 서비스 등록 + 자동 기동.
 
