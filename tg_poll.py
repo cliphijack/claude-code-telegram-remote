@@ -73,12 +73,61 @@ sys.path.insert(0, str(BASE_DIR))
 from tg_commands import dispatch, CommandResult  # noqa: E402
 
 
+LOG_MAX_BYTES = 5 * 1024 * 1024   # 5 MB per file
+LOG_KEEP_ROTATIONS = 3            # keep .1, .2, .3
+PHOTO_MAX_AGE_SECONDS = 7 * 24 * 3600  # screenshots older than 7 days
+
+
+def rotate_if_large(path: Path, max_bytes: int = LOG_MAX_BYTES,
+                    keep: int = LOG_KEEP_ROTATIONS) -> None:
+    """Rotate a log file when it crosses the size threshold.
+
+    Renames path.N → path.(N+1), dropping the oldest beyond `keep`,
+    then moves the current path → path.1. Cheap enough to call anywhere;
+    no-op if the file is under threshold or missing.
+    """
+    try:
+        if not path.exists() or path.stat().st_size < max_bytes:
+            return
+        # Shift existing rotations: .(keep-1) → .keep, ..., .1 → .2
+        oldest = path.with_suffix(path.suffix + f".{keep}")
+        if oldest.exists():
+            oldest.unlink()
+        for i in range(keep - 1, 0, -1):
+            src = path.with_suffix(path.suffix + f".{i}")
+            dst = path.with_suffix(path.suffix + f".{i + 1}")
+            if src.exists():
+                src.rename(dst)
+        path.rename(path.with_suffix(path.suffix + ".1"))
+    except Exception:
+        # Rotation is best-effort — do not crash the poller over log plumbing.
+        pass
+
+
 def log(msg: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line, flush=True)
+    rotate_if_large(LOG_FILE)
     with LOG_FILE.open("a") as f:
         f.write(line + "\n")
+
+
+def cleanup_old_photos(max_age: int = PHOTO_MAX_AGE_SECONDS) -> int:
+    """Delete screenshots older than `max_age` seconds. Returns count removed."""
+    photos_dir = BASE_DIR / "photos"
+    if not photos_dir.exists():
+        return 0
+    cutoff = time.time() - max_age
+    removed = 0
+    try:
+        for p in photos_dir.iterdir():
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+    except Exception:
+        pass
+    return removed
 
 
 def load_env() -> dict:
@@ -465,8 +514,24 @@ def save_state(state: dict) -> None:
 
 
 def append_inbox(update: dict) -> None:
+    rotate_if_large(INBOX_FILE)
     with INBOX_FILE.open("a") as f:
         f.write(json.dumps(update, ensure_ascii=False) + "\n")
+
+
+class TelegramRateLimited(Exception):
+    """Raised when Telegram returns 429. `retry_after` is seconds to wait."""
+    def __init__(self, retry_after: int, message: str = "") -> None:
+        super().__init__(message or f"rate limited, retry after {retry_after}s")
+        self.retry_after = retry_after
+
+
+class TelegramAuthError(Exception):
+    """401 (bad token) or 404 (malformed URL). Not retryable without human fix."""
+
+
+class TelegramConflict(Exception):
+    """409 — another poller holds getUpdates. Backoff hard to avoid duel."""
 
 
 def get_updates(token: str, offset: int) -> list[dict]:
@@ -477,8 +542,28 @@ def get_updates(token: str, offset: int) -> list[dict]:
     }
     url = f"https://api.telegram.org/bot{token}/getUpdates?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        # Telegram returns structured JSON even on error responses.
+        try:
+            body = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            body = {}
+        code = e.code
+        desc = body.get("description", "")
+        retry_after = int(body.get("parameters", {}).get("retry_after", 0) or 0)
+        if code == 429:
+            # Prefer the server's Retry-After; fall back to header, then 1s.
+            header_ra = int(e.headers.get("Retry-After", "0") or 0)
+            wait = max(retry_after, header_ra, 1)
+            raise TelegramRateLimited(wait, desc) from e
+        if code in (401, 404):
+            raise TelegramAuthError(f"{code} {desc}") from e
+        if code == 409:
+            raise TelegramConflict(desc) from e
+        raise RuntimeError(f"Telegram HTTP {code}: {desc}") from e
     if not data.get("ok"):
         raise RuntimeError(f"Telegram API error: {data}")
     return data.get("result", [])
@@ -500,13 +585,19 @@ def main() -> None:
     state = load_state()
     log(f"🚀 tg_poll started (last_update_id={state['last_update_id']}, "
         f"tmux={tmux_target or 'OFF'}, allowlist={len(allowed_ids)} ids)")
+    removed = cleanup_old_photos()
+    if removed:
+        log(f"🧹 cleaned {removed} stale screenshot(s) older than 7 days")
 
     backoff = 1.0
+    consecutive_failures = 0
+    MAX_CONSECUTIVE_FAILURES = 100  # launchd/systemd가 재기동
     while True:
         try:
             offset = state["last_update_id"] + 1
             updates = get_updates(token, offset)
             backoff = 1.0  # 성공하면 리셋
+            consecutive_failures = 0
             for u in updates:
                 append_inbox(u)
                 state["last_update_id"] = max(state["last_update_id"], u["update_id"])
@@ -567,14 +658,36 @@ def main() -> None:
                     log(f"⚠️ unknown action: {result.action}")
             if updates:
                 save_state(state)
+        except TelegramRateLimited as e:
+            # 429 — honor server's retry_after, do NOT exponential backoff on top.
+            wait = e.retry_after
+            log(f"⏳ Telegram 429 rate limited — sleeping {wait}s (server request)")
+            time.sleep(wait)
+            # Do not bump consecutive_failures: rate limit is benign, not an outage.
+        except TelegramAuthError as e:
+            log(f"🔑 Auth error: {e}. Check TELEGRAM_BOT_TOKEN in .env. "
+                f"Sleeping 5min before retry.")
+            time.sleep(300)
+            consecutive_failures += 1
+        except TelegramConflict as e:
+            # Another getUpdates poller is active. Sleep long to avoid a duel.
+            log(f"⚔️ Polling conflict: {e}. Sleeping 30s.")
+            time.sleep(30)
+            consecutive_failures += 1
         except urllib.error.URLError as e:
             log(f"⚠️ Network error: {e} — retry in {backoff:.1f}s")
             time.sleep(backoff)
             backoff = min(backoff * 2, 60)
+            consecutive_failures += 1
         except Exception as e:
             log(f"❌ Unexpected error: {e} — retry in {backoff:.1f}s")
             time.sleep(backoff)
             backoff = min(backoff * 2, 60)
+            consecutive_failures += 1
+        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            log(f"💀 {consecutive_failures} consecutive failures — exiting so "
+                f"launchd/systemd can restart cleanly")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
