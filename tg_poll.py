@@ -73,12 +73,61 @@ sys.path.insert(0, str(BASE_DIR))
 from tg_commands import dispatch, CommandResult  # noqa: E402
 
 
+LOG_MAX_BYTES = 5 * 1024 * 1024   # 5 MB per file
+LOG_KEEP_ROTATIONS = 3            # keep .1, .2, .3
+PHOTO_MAX_AGE_SECONDS = 7 * 24 * 3600  # screenshots older than 7 days
+
+
+def rotate_if_large(path: Path, max_bytes: int = LOG_MAX_BYTES,
+                    keep: int = LOG_KEEP_ROTATIONS) -> None:
+    """Rotate a log file when it crosses the size threshold.
+
+    Renames path.N → path.(N+1), dropping the oldest beyond `keep`,
+    then moves the current path → path.1. Cheap enough to call anywhere;
+    no-op if the file is under threshold or missing.
+    """
+    try:
+        if not path.exists() or path.stat().st_size < max_bytes:
+            return
+        # Shift existing rotations: .(keep-1) → .keep, ..., .1 → .2
+        oldest = path.with_suffix(path.suffix + f".{keep}")
+        if oldest.exists():
+            oldest.unlink()
+        for i in range(keep - 1, 0, -1):
+            src = path.with_suffix(path.suffix + f".{i}")
+            dst = path.with_suffix(path.suffix + f".{i + 1}")
+            if src.exists():
+                src.rename(dst)
+        path.rename(path.with_suffix(path.suffix + ".1"))
+    except Exception:
+        # Rotation is best-effort — do not crash the poller over log plumbing.
+        pass
+
+
 def log(msg: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line, flush=True)
+    rotate_if_large(LOG_FILE)
     with LOG_FILE.open("a") as f:
         f.write(line + "\n")
+
+
+def cleanup_old_photos(max_age: int = PHOTO_MAX_AGE_SECONDS) -> int:
+    """Delete screenshots older than `max_age` seconds. Returns count removed."""
+    photos_dir = BASE_DIR / "photos"
+    if not photos_dir.exists():
+        return 0
+    cutoff = time.time() - max_age
+    removed = 0
+    try:
+        for p in photos_dir.iterdir():
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+    except Exception:
+        pass
+    return removed
 
 
 def load_env() -> dict:
@@ -465,6 +514,7 @@ def save_state(state: dict) -> None:
 
 
 def append_inbox(update: dict) -> None:
+    rotate_if_large(INBOX_FILE)
     with INBOX_FILE.open("a") as f:
         f.write(json.dumps(update, ensure_ascii=False) + "\n")
 
@@ -535,6 +585,9 @@ def main() -> None:
     state = load_state()
     log(f"🚀 tg_poll started (last_update_id={state['last_update_id']}, "
         f"tmux={tmux_target or 'OFF'}, allowlist={len(allowed_ids)} ids)")
+    removed = cleanup_old_photos()
+    if removed:
+        log(f"🧹 cleaned {removed} stale screenshot(s) older than 7 days")
 
     backoff = 1.0
     consecutive_failures = 0
