@@ -162,7 +162,7 @@ ALLOWED_USER_IDS=123456789                    # 본인 user ID (콤마로 여러
 |------|------|
 | `/help` | 명령어 목록 |
 | `/screen`, `/tail N` | 현재 tmux 화면을 텍스트로 전송 |
-| `/screenshot` | 화면을 PNG로 전송 (macOS: `screencapture` / Linux: `grim`·`scrot`·`gnome-screenshot`·`maim` 중 하나 필요) |
+| `/screenshot` | 화면을 PNG로 전송 ([플랫폼별 지원 범위 ↓](#screenshot-플랫폼별-지원)) |
 | `/cancel`, `/esc`, `/enter` | 키 이벤트 주입 |
 | `/yes`, `/no`, `/1`~`/9` | 옵션 프롬프트 응답 |
 | `/compact`, `/cost`, `/agents`, `/model <n>` | Claude Code 네이티브 슬래시 |
@@ -173,12 +173,78 @@ ALLOWED_USER_IDS=123456789                    # 본인 user ID (콤마로 여러
 
 ---
 
+## `/screenshot` 플랫폼별 지원
+
+| 플랫폼 | 지원 범위 | 비고 |
+|--------|-----------|------|
+| **macOS** | ✅ 풀 지원 | 창 단위 캡처 가능 (아래 macOS 설정 참고) |
+| **Linux 데스크탑 (X11/Wayland)** | ⚠️ 전체 화면만 | `grim`·`scrot`·`gnome-screenshot`·`maim` 중 하나 필요 |
+| **WSL2** | ❌ 불가 | 디스플레이 서버 없음 — `/screen`·`/tail`로 대체 |
+| **헤드리스 서버** | ❌ 불가 | 같은 이유 |
+
+Linux에서 도구 설치:
+```bash
+# Ubuntu/Debian (Wayland)
+sudo apt install -y grim
+
+# 또는 X11
+sudo apt install -y scrot
+```
+
+봇이 자동으로 PATH에서 `grim → gnome-screenshot → scrot → maim` 순으로 찾음.
+
+---
+
+## macOS 추가 설정
+
+### 1. 화면 녹화 권한 (필수)
+
+`/screenshot`이 동작하려면 launchd가 실행하는 `python3` 바이너리에 **화면 녹화** 권한이 있어야 함.
+
+1. **시스템 설정 → 개인정보 보호 및 보안 → 화면 녹화**
+2. `+` 버튼 → `/usr/bin/python3` 추가 (또는 `install.sh`가 plist에 박은 파이썬 경로)
+3. 토글 ON
+4. 권한 부여 후 데몬 재기동:
+   ```bash
+   launchctl kickstart -k gui/$(id -u)/com.$(whoami).tg-poll
+   ```
+
+> **주의**: `/Library/Frameworks/Python.framework/Versions/3.x/bin/python3`는 심볼릭 링크라 TCC가 인식 못 함. 실제 번들 경로(`.../Resources/Python.app`)를 추가해야 하는 경우가 있음. 가장 확실한 건 `/usr/bin/python3` 사용 (install.sh 기본값).
+
+### 2. 창 단위 캡처용 pyobjc (선택)
+
+`.env`에 `TERMINAL_APP`을 지정하면 **그 앱의 창만** 캡처함 (데스크탑 전체가 아니라). Quartz(CoreGraphics)로 창 ID를 찾는 과정에서 pyobjc가 필요:
+
+```bash
+pip3 install --user pyobjc-framework-Quartz
+```
+
+설치 안 돼 있으면 경고 없이 **전체 화면 캡처로 폴백** — 선택 사항.
+
+`.env` 예시:
+```
+TERMINAL_APP=Termius     # 또는 iTerm, Terminal, Warp, Ghostty, kitty, Alacritty, WezTerm
+```
+
+대소문자 무관, 부분 일치. 해당 앱의 가장 큰 on-screen 창 하나만 찍음.
+
+### 3. Homebrew python3 사용 시
+
+install.sh가 `command -v python3` 결과를 plist에 박기 때문에 Homebrew 파이썬(`/opt/homebrew/bin/python3`)이 먼저 걸리면 그 경로로 등록됨. 이 경우:
+
+- **화면 녹화 권한**은 Homebrew python3 경로에 추가해야 함
+- 또는 plist를 수정해서 `/usr/bin/python3`로 바꾸고 kickstart
+
+권한은 **plist가 실제로 실행하는 바이너리**에 붙이는 게 원칙.
+
+---
+
 ## 보안
 
 - `ALLOWED_USER_IDS`에 등록되지 않은 chat은 **무응답 fail-secure**
 - `.env`는 `chmod 600`, git `.gitignore`에 포함
 - 위험 명령은 UUID 토큰 + 60초 TTL로 실수 방지
-- macOS 시스템 설정 → 개인정보보호 → **화면 녹화**에 `/usr/bin/python3` 허용해야 `/screenshot` 동작
+- macOS `/screenshot`은 화면 녹화 권한 필요 — [macOS 추가 설정](#macos-추가-설정) 참고
 
 ---
 
