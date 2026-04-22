@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for macOS LaunchAgent. install.sh substitutes __HOME__ with the
+  running user's $HOME at install time. Do not edit this template directly
+  after install; re-run install.sh to regenerate.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.tg-poll</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
+        <string>__HOME__/.claude/channels/telegram/tg_poll.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/.claude/channels/telegram</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.claude/channels/telegram/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.claude/channels/telegram/launchd.err.log</string>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>

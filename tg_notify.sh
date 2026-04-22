@@ -11,7 +11,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/.env"
 
-CHAT_ID="7703208804"
+: "${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN not set in .env}"
+: "${TELEGRAM_CHAT_ID:?TELEGRAM_CHAT_ID not set in .env}"
+
+CHAT_ID="${TELEGRAM_CHAT_ID}"
 API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
 
 if [ $# -eq 0 ]; then

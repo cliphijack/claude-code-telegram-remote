@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -28,7 +29,42 @@ INBOX_FILE = BASE_DIR / "inbox.jsonl"
 LOG_FILE = BASE_DIR / "poll.log"
 
 TG_NOTIFY = BASE_DIR / "tg_notify.sh"
-TMUX_BIN = "/opt/homebrew/bin/tmux"
+
+# Resolve tmux binary across platforms: macOS Homebrew (/opt/homebrew/bin),
+# Intel Homebrew (/usr/local/bin), Linux distros (/usr/bin).
+# `shutil.which` uses PATH; fall back to common install locations if unset.
+def _resolve_tmux() -> str:
+    found = shutil.which("tmux")
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"):
+        if Path(candidate).exists():
+            return candidate
+    return "tmux"  # last resort — let subprocess raise a clear error
+
+
+TMUX_BIN = _resolve_tmux()
+
+
+# Platform-specific screenshot tool detection. macOS uses `screencapture`;
+# Linux has several options depending on display server (X11 vs Wayland).
+def _resolve_screenshot_cmd(out_path: Path) -> list[str] | None:
+    if sys.platform == "darwin":
+        if Path("/usr/sbin/screencapture").exists():
+            return ["/usr/sbin/screencapture", "-x", str(out_path)]
+        return None
+    # Linux / BSD: try common tools in order of preference.
+    # grim (Wayland), gnome-screenshot (GNOME), scrot (X11 lightweight), maim (X11).
+    for tool, args in (
+        ("grim", [str(out_path)]),
+        ("gnome-screenshot", ["-f", str(out_path)]),
+        ("scrot", [str(out_path)]),
+        ("maim", [str(out_path)]),
+    ):
+        path = shutil.which(tool)
+        if path:
+            return [path, *args]
+    return None
 
 LONG_POLL_TIMEOUT = 30  # seconds — Telegram 서버에서 최대 대기
 HTTP_TIMEOUT = LONG_POLL_TIMEOUT + 10
@@ -373,9 +409,17 @@ def start_watcher(name: str, tmux_target: str) -> None:
 def send_screen_png() -> None:
     out = BASE_DIR / "photos" / f"screen-{int(time.time())}.png"
     out.parent.mkdir(exist_ok=True)
+    cmd = _resolve_screenshot_cmd(out)
+    if cmd is None:
+        msg = (
+            "❌ screenshot 도구를 찾을 수 없음. "
+            "macOS는 screencapture, Linux는 grim/gnome-screenshot/scrot/maim 중 하나 필요"
+        )
+        log(f"⚠️ {msg}")
+        tg_reply(msg)
+        return
     try:
-        subprocess.run(["/usr/sbin/screencapture", "-x", str(out)],
-                       check=True, timeout=10)
+        subprocess.run(cmd, check=True, timeout=10)
         subprocess.run([str(TG_NOTIFY), "📸 screenshot", "--photo", str(out)],
                        check=True, timeout=20)
     except Exception as e:
