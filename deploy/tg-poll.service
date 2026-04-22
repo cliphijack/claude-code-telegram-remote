@@ -1,6 +1,6 @@
 [Unit]
 Description=Telegram remote control poller for Claude Code
-Documentation=https://github.com/yonghaekim/claude-code-telegram-remote
+Documentation=https://github.com/etinpres/claude-code-telegram-remote
 After=network-online.target
 Wants=network-online.target
 

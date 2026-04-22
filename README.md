@@ -33,7 +33,7 @@
 ### 3. 저장소 클론 + 설치
 
 ```bash
-git clone https://github.com/YOUR_ACCOUNT/claude-code-telegram-remote.git \
+git clone https://github.com/etinpres/claude-code-telegram-remote.git \
   ~/.claude/channels/telegram
 cd ~/.claude/channels/telegram
 ./install.sh
