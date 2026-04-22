@@ -494,20 +494,53 @@ def detect_prompt(pane: str) -> tuple[str, list[str]] | None:
     if cursor_idx is None:
         return None
 
-    # Collect the full option block — consecutive lines matching "  N. " or
-    # the cursor line itself. Walk forward then backward from cursor.
+    # Collect the full option block. AskUserQuestion often renders an indented
+    # description after each `  N. label` line, so we can't require option
+    # lines to be strictly consecutive. Allow a small gap of non-divider,
+    # non-option lines (the description) between entries.
+    MAX_GAP = 3
+
+    def _is_block_line(idx: int) -> bool:
+        return bool(
+            _PROMPT_CONT_RE.match(lines[idx])
+            or _PROMPT_OPTION_RE.match(lines[idx])
+        )
+
     block_start = cursor_idx
-    while block_start - 1 >= 0 and (
-        _PROMPT_CONT_RE.match(lines[block_start - 1])
-        or _PROMPT_OPTION_RE.match(lines[block_start - 1])
-    ):
-        block_start -= 1
+    j = cursor_idx - 1
+    gap = 0
+    while j >= 0 and gap <= MAX_GAP:
+        if _is_block_line(j):
+            block_start = j
+            gap = 0
+        elif _is_divider(lines[j]):
+            break
+        elif lines[j].strip():
+            gap += 1
+        j -= 1
+
     block_end = cursor_idx
-    while block_end + 1 < len(lines) and (
-        _PROMPT_CONT_RE.match(lines[block_end + 1])
-        or _PROMPT_OPTION_RE.match(lines[block_end + 1])
-    ):
-        block_end += 1
+    k = cursor_idx + 1
+    gap = 0
+    while k < len(lines) and gap <= MAX_GAP:
+        if _is_block_line(k):
+            block_end = k
+            gap = 0
+        elif _is_divider(lines[k]):
+            break
+        elif lines[k].strip():
+            gap += 1
+        k += 1
+
+    # Include any description lines trailing the last matched option — these
+    # sit between the last numbered line and the next blank/divider boundary.
+    k = block_end + 1
+    while k < len(lines):
+        line = lines[k]
+        if _is_divider(line) or _is_block_line(k) or not line.strip():
+            break
+        block_end = k
+        k += 1
 
     # Context = the question text immediately above the option block.
     # Stop at the first divider or blank line — question and options are a

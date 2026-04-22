@@ -128,3 +128,24 @@ def test_context_capped_at_four_lines():
     joined = "\n".join(preview)
     assert "L1" in joined and "L4" in joined
     assert "L5" not in joined and "L6" not in joined
+
+
+def test_options_with_descriptions_all_captured():
+    """AskUserQuestion inserts description lines between `  N. label` rows;
+    block extension must tolerate that gap."""
+    pane = (
+        "Question?\n"
+        "❯ 1. Option A\n"
+        "    details about A span a line\n"
+        "  2. Option B\n"
+        "    details about B\n"
+        "  3. Option C\n"
+        "    details about C\n"
+    )
+    result = detect_prompt(pane)
+    assert result is not None
+    _, preview = result
+    joined = "\n".join(preview)
+    for marker in ("Option A", "Option B", "Option C",
+                   "details about A", "details about B", "details about C"):
+        assert marker in joined, f"{marker!r} missing from preview"
