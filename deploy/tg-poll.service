@@ -1,0 +1,23 @@
+[Unit]
+Description=Telegram remote control poller for Claude Code
+Documentation=https://github.com/yonghaekim/claude-code-telegram-remote
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 %h/.claude/channels/telegram/tg_poll.py
+WorkingDirectory=%h/.claude/channels/telegram
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:%h/.claude/channels/telegram/systemd.out.log
+StandardError=append:%h/.claude/channels/telegram/systemd.err.log
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.claude/channels/telegram
+
+[Install]
+WantedBy=default.target
