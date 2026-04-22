@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -18,6 +19,12 @@ BASE_DIR = Path(__file__).resolve().parent
 PENDING_FILE = BASE_DIR / "pending.json"
 CONFIRM_TTL_SECONDS = 60
 DEFAULT_TAIL_LINES = 50
+
+# Pattern-based slash passthrough: matches any /foo, /foo:bar, /foo-bar_baz.
+# Applied AFTER allowlist and special handlers, BEFORE fallback_prefix.
+# Rationale: supports plugin:skill form (e.g. /superpowers:write-plan) and
+# user-installed skills without hard-coding every name.
+SLASH_PATTERN = re.compile(r"^/[a-z0-9][a-z0-9:_-]*$", re.IGNORECASE)
 
 Action = Literal[
     "raw_inject",
@@ -263,5 +270,11 @@ def dispatch(text: str, now: float | None = None) -> CommandResult:
     if rest and (cmd in RAW_SLASH_WITH_ARGS or cmd in SKILL_SLASH):
         return CommandResult(action="raw_inject", payload=f"{cmd} {rest}".strip())
 
-    # 7. Default: unknown slash → fall back to the prefixed injection path.
+    # 7. Pattern-based passthrough — any well-formed slash (incl. plugin:skill)
+    #    gets injected raw. Claude Code TUI handles unknowns itself.
+    if SLASH_PATTERN.match(cmd):
+        payload = f"{cmd} {rest}".strip() if rest else cmd
+        return CommandResult(action="raw_inject", payload=payload)
+
+    # 8. Default: malformed slash → fall back to the prefixed injection path.
     return CommandResult(action="fallback_prefix", payload=text)

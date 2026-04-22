@@ -67,10 +67,30 @@ def test_skill_slash_with_args():
     assert r.payload == "/qa taxi-ledger"
 
 
-def test_unknown_slash_falls_back():
+def test_unknown_slash_is_injected_raw():
+    # Unknown but well-formed slashes pass through — Claude Code TUI handles them.
     r = dispatch("/totallyunknownxyz foo")
-    assert r.action == "fallback_prefix"
+    assert r.action == "raw_inject"
     assert r.payload == "/totallyunknownxyz foo"
+
+
+def test_plugin_namespaced_slash_injected_raw():
+    # plugin:skill form (e.g. /superpowers:write-plan) must pass through.
+    r = dispatch("/superpowers:write-plan")
+    assert r.action == "raw_inject"
+    assert r.payload == "/superpowers:write-plan"
+
+
+def test_plugin_namespaced_slash_with_args():
+    r = dispatch("/vercel-plugin:deploy prod")
+    assert r.action == "raw_inject"
+    assert r.payload == "/vercel-plugin:deploy prod"
+
+
+def test_malformed_slash_falls_back():
+    # Spaces/weird chars in the command itself → fallback_prefix.
+    r = dispatch("/ hello world")
+    assert r.action == "fallback_prefix"
 
 
 # --- Task 3: key sequence injection ---
