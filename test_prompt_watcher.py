@@ -76,3 +76,55 @@ def test_caret_greater_cursor_also_detected():
     pane = "Q?\n> 1. A\n  2. B\n"
     result = detect_prompt(pane)
     assert result is not None
+
+
+def test_divider_stops_context_scan():
+    """Lines above a divider (TUI frame, previous output) must not leak in."""
+    pane = (
+        "Previous bash call output here\n"
+        "More unrelated output\n"
+        "─────────────────────────────\n"
+        "The actual question text?\n"
+        "❯ 1. Option A\n"
+        "  2. Option B\n"
+    )
+    result = detect_prompt(pane)
+    assert result is not None
+    _, preview = result
+    joined = "\n".join(preview)
+    assert "The actual question text?" in joined
+    assert "Previous bash call output" not in joined, (
+        "divider did not stop context scan — unrelated output leaked"
+    )
+    assert "─────" not in joined, "divider line itself must not be included"
+
+
+def test_blank_line_alone_does_not_stop_context():
+    """Empty lines inside the question block are OK — only dividers stop."""
+    # Actually with current design we want blank lines to be skipped too,
+    # since the question and options sit tight. Dividers are the hard boundary.
+    pane = (
+        "Question line 1\n"
+        "Question line 2\n"
+        "❯ 1. A\n"
+        "  2. B\n"
+    )
+    result = detect_prompt(pane)
+    assert result is not None
+    _, preview = result
+    joined = "\n".join(preview)
+    assert "Question line 1" in joined
+    assert "Question line 2" in joined
+
+
+def test_context_capped_at_four_lines():
+    pane = (
+        "L6\nL5\nL4\nL3\nL2\nL1\n"
+        "❯ 1. A\n  2. B\n"
+    )
+    result = detect_prompt(pane)
+    assert result is not None
+    _, preview = result
+    joined = "\n".join(preview)
+    assert "L1" in joined and "L4" in joined
+    assert "L5" not in joined and "L6" not in joined

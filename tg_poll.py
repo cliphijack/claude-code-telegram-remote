@@ -460,6 +460,21 @@ import re       # noqa: E402
 # "❯ 1. A) ..." — both start with `❯ ` followed by a digit+period.
 _PROMPT_OPTION_RE = re.compile(r"^\s*[❯>]\s*(\d+)\.\s")
 _PROMPT_CONT_RE = re.compile(r"^\s*(\d+)\.\s")
+# Lines that are mostly box-drawing / divider chars — stop context scan here
+# so TUI frame lines don't pollute the notification preview.
+_DIVIDER_CHARS = set("─━═╌╍╴╶╸╺│┃┆┇┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛━╸╺")
+
+
+def _is_divider(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return True
+    # A line is a divider if >80% of its non-space chars are box-drawing.
+    non_space = [c for c in stripped if not c.isspace()]
+    if not non_space:
+        return True
+    divider_count = sum(1 for c in non_space if c in _DIVIDER_CHARS)
+    return divider_count / len(non_space) >= 0.8
 
 
 def detect_prompt(pane: str) -> tuple[str, list[str]] | None:
@@ -494,13 +509,17 @@ def detect_prompt(pane: str) -> tuple[str, list[str]] | None:
     ):
         block_end += 1
 
-    # Context = up to 6 non-empty lines above the option block (the question text).
+    # Context = the question text immediately above the option block.
+    # Stop at the first divider or blank line — question and options are a
+    # tight visual unit, and anything past a divider is unrelated TUI chrome
+    # or prior output that would confuse the Telegram reader.
     ctx_lines: list[str] = []
     j = block_start - 1
-    while j >= 0 and len(ctx_lines) < 6:
+    while j >= 0 and len(ctx_lines) < 4:
         line = lines[j].rstrip()
-        if line.strip():
-            ctx_lines.insert(0, line)
+        if _is_divider(line):
+            break
+        ctx_lines.insert(0, line)
         j -= 1
 
     options = [lines[k].rstrip() for k in range(block_start, block_end + 1)]
@@ -541,11 +560,8 @@ def watch_prompts(tmux_target: str, interval_s: float = 3.0) -> None:
             if len(body) > 1500:
                 body = body[:1500] + "\n…(잘림)"
             tg_reply(
-                "🔔 Claude Code 응답 대기 중\n"
-                "─────────────────\n"
-                f"{body}\n"
-                "─────────────────\n"
-                "선택: /1  /2  /3  …  (또는 /yes /no /esc)"
+                f"🔔 Claude Code 응답 대기\n\n{body}\n\n"
+                f"응답: /1 /2 /3 … 또는 /yes /no /esc"
             )
         except Exception as e:
             # Never let this thread die; just log and keep going.
