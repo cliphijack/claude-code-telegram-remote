@@ -1,0 +1,78 @@
+"""Unit tests for the prompt-watcher detect function.
+
+Run:  python3 -m pytest test_prompt_watcher.py -v
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tg_poll import detect_prompt
+
+
+def test_detect_permission_prompt():
+    pane = (
+        "Tool call pending\n"
+        "\n"
+        "Do you want to make this edit to foo.py?\n"
+        "❯ 1. Yes\n"
+        "  2. Yes, and allow Claude to edit its own settings for this session\n"
+        "  3. No\n"
+    )
+    result = detect_prompt(pane)
+    assert result is not None
+    prompt_hash, preview = result
+    assert len(prompt_hash) == 12
+    joined = "\n".join(preview)
+    assert "Do you want to make this edit" in joined
+    assert "❯ 1. Yes" in joined
+    assert "3. No" in joined
+
+
+def test_detect_ask_user_question():
+    pane = (
+        "Choose a plan review mode.\n"
+        "\n"
+        "❯ 1. A) Full review\n"
+        "  2. B) Skip review\n"
+        "  3. C) Delegate to codex\n"
+    )
+    result = detect_prompt(pane)
+    assert result is not None
+    _, preview = result
+    assert "A) Full review" in "\n".join(preview)
+
+
+def test_no_prompt_returns_none():
+    pane = "Just output\nwith no prompt\nand no cursor glyph\n"
+    assert detect_prompt(pane) is None
+
+
+def test_numbered_list_without_cursor_ignored():
+    """Plain numbered output (e.g. /help) must not trigger the watcher."""
+    pane = "1. first\n2. second\n3. third\n"
+    assert detect_prompt(pane) is None
+
+
+def test_same_prompt_produces_stable_hash():
+    pane1 = "Q?\n❯ 1. Yes\n  2. No\n"
+    pane2 = "different context above\n\nQ?\n❯ 1. Yes\n  2. No\n"
+    h1, _ = detect_prompt(pane1)
+    h2, _ = detect_prompt(pane2)
+    assert h1 == h2, "hash must depend only on the option block"
+
+
+def test_different_options_produce_different_hash():
+    pane1 = "❯ 1. Yes\n  2. No\n"
+    pane2 = "❯ 1. Accept\n  2. Reject\n"
+    h1, _ = detect_prompt(pane1)
+    h2, _ = detect_prompt(pane2)
+    assert h1 != h2
+
+
+def test_caret_greater_cursor_also_detected():
+    """Some terminals render the cursor as `>` rather than `❯`."""
+    pane = "Q?\n> 1. A\n  2. B\n"
+    result = detect_prompt(pane)
+    assert result is not None
