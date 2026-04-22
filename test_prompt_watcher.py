@@ -130,6 +130,42 @@ def test_context_capped_at_four_lines():
     assert "L5" not in joined and "L6" not in joined
 
 
+def test_collapse_tui_noise_keeps_one_separator_and_one_blank():
+    from tg_poll import _collapse_tui_noise, _is_separator
+    raw = [
+        "Some content",
+        "",
+        "",
+        "────────────",
+        "────────────",
+        "────────────",
+        "",
+        "❯ input",
+        "────────────",
+        "────────────",
+        "ctx 28%",
+    ]
+    out = _collapse_tui_noise(raw)
+    assert "Some content" in out
+    assert "❯ input" in out
+    assert "ctx 28%" in out
+    # Consecutive separators collapse to one, never zero.
+    sep_count = sum(1 for l in out if _is_separator(l))
+    assert sep_count == 2, f"expected 2 separator boundaries (pre-input + pre-chrome), got {sep_count}"
+    # Separators must be short enough that a phone screen doesn't wrap them.
+    for l in out:
+        if _is_separator(l):
+            assert len(l) <= 40, f"separator too long, will wrap on mobile: {len(l)} chars"
+    # No adjacent duplicate separators.
+    for i in range(1, len(out)):
+        if _is_separator(out[i]):
+            assert not _is_separator(out[i - 1]), "consecutive separators leaked"
+    # No double blanks.
+    for i in range(1, len(out)):
+        if not out[i].strip():
+            assert out[i - 1].strip(), "consecutive blanks leaked"
+
+
 def test_blank_line_between_question_and_options_captured():
     """Claude Code TUI inserts a blank line between the question and the
     option block. That blank must not stop context collection."""

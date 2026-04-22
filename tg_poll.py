@@ -314,7 +314,7 @@ def handle_restart_claude(tmux_target: str, binary: str) -> None:
         tg_reply(f"❌ restart 실패: {e}")
 
 
-_SEP_CHARS = set("─━═-")
+_SEP_CHARS = set("─━═-━╌╍╴╶╸╺")
 
 
 def _is_separator(line: str) -> bool:
@@ -322,6 +322,46 @@ def _is_separator(line: str) -> bool:
     if len(stripped) < 5:
         return False
     return all(c in _SEP_CHARS for c in stripped)
+
+
+_SEPARATOR_REPLACEMENT = "─" * 20  # short enough to not wrap on a phone screen
+
+
+def _collapse_tui_noise(lines: list[str]) -> list[str]:
+    """Collapse consecutive separator and blank lines, shorten separators.
+
+    Claude Code renders full-width `─` frame dividers (often 150+ chars)
+    plus padding blanks to fill the pane vertically. Telegram on a phone
+    wraps a single 150-char divider into 8-9 visible rows, so even one
+    divider looks like a wall. Replace each run of separators with a
+    short fixed-length one (20 chars), and collapse blank runs to one.
+    """
+    out: list[str] = []
+    prev_blank = False
+    prev_sep = False
+    for line in lines:
+        if _is_separator(line):
+            if prev_sep:
+                continue
+            prev_sep = True
+            prev_blank = False
+            out.append(_SEPARATOR_REPLACEMENT)
+        elif not line.strip():
+            if prev_blank:
+                continue
+            prev_blank = True
+            prev_sep = False
+            out.append("")
+        else:
+            prev_blank = False
+            prev_sep = False
+            out.append(line)
+    # Trim leading/trailing blanks (but keep separators — they're boundaries).
+    while out and not out[0].strip():
+        out.pop(0)
+    while out and not out[-1].strip():
+        out.pop()
+    return out
 
 
 def _split_body_chrome(all_lines: list[str]) -> tuple[list[str], list[str]]:
@@ -352,6 +392,11 @@ def send_screen_text(tmux_target: str, lines: int) -> None:
         all_lines = raw.rstrip("\n").split("\n") if raw else []
         body, chrome = _split_body_chrome(all_lines)
         if chrome:
+            # Strip TUI noise (separator lines, duplicated blanks) from both
+            # halves before counting — otherwise body N reflects chrome
+            # padding instead of real content.
+            body = _collapse_tui_noise(body)
+            chrome = _collapse_tui_noise(chrome)
             # Count only non-blank lines toward `lines`; blank lines come along for free.
             non_blank = 0
             start_idx = 0
@@ -364,12 +409,13 @@ def send_screen_text(tmux_target: str, lines: int) -> None:
             else:
                 start_idx = 0
             body = body[start_idx:]
-            combined = body + chrome
+            combined = body + ([""] if chrome else []) + chrome
             text = "\n".join(combined) if combined else "(empty pane)"
             non_blank_count = sum(1 for l in body if l.strip())
             header = f"📺 screen (body {non_blank_count}/{lines} + chrome):"
         else:
             # Fallback: no prompt detected, raw tail
+            all_lines = _collapse_tui_noise(all_lines)
             if len(all_lines) > lines:
                 all_lines = all_lines[-lines:]
             text = "\n".join(all_lines) if all_lines else "(empty pane)"
