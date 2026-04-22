@@ -1,0 +1,13 @@
+.env
+access.json
+approved/
+inbox.jsonl
+launchd.err.log
+launchd.out.log
+pending.json
+photos/
+poll.log
+state.json
+__pycache__/
+.pytest_cache/
+*.pyc
