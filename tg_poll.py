@@ -466,13 +466,18 @@ _DIVIDER_CHARS = set("─━═╌╍╴╶╸╺│┃┆┇┊┋┌┍┎┏�
 
 
 def _is_divider(line: str) -> bool:
+    """Only a line made mostly of box-drawing characters counts as a divider.
+
+    Blank lines are NOT dividers — Claude Code renders an empty line between
+    the question and the option block, and treating that as a stop would
+    clip the question from the notification preview.
+    """
     stripped = line.strip()
     if not stripped:
-        return True
-    # A line is a divider if >80% of its non-space chars are box-drawing.
+        return False
     non_space = [c for c in stripped if not c.isspace()]
     if not non_space:
-        return True
+        return False
     divider_count = sum(1 for c in non_space if c in _DIVIDER_CHARS)
     return divider_count / len(non_space) >= 0.8
 
@@ -542,17 +547,21 @@ def detect_prompt(pane: str) -> tuple[str, list[str]] | None:
         block_end = k
         k += 1
 
-    # Context = the question text immediately above the option block.
-    # Stop at the first divider or blank line — question and options are a
-    # tight visual unit, and anything past a divider is unrelated TUI chrome
-    # or prior output that would confuse the Telegram reader.
+    # Context = the question text above the option block. Blank lines are
+    # skipped (Claude Code renders an empty line between question and
+    # options), but real box-drawing dividers hard-stop the scan so that
+    # unrelated TUI chrome / prior output never leaks in. Bounded search
+    # window so the scan can't run up the entire pane.
+    MAX_CTX_SCAN = 15
     ctx_lines: list[str] = []
     j = block_start - 1
-    while j >= 0 and len(ctx_lines) < 4:
+    stop_at = max(-1, block_start - 1 - MAX_CTX_SCAN)
+    while j > stop_at and len(ctx_lines) < 4:
         line = lines[j].rstrip()
         if _is_divider(line):
             break
-        ctx_lines.insert(0, line)
+        if line.strip():
+            ctx_lines.insert(0, line)
         j -= 1
 
     options = [lines[k].rstrip() for k in range(block_start, block_end + 1)]

@@ -130,6 +130,22 @@ def test_context_capped_at_four_lines():
     assert "L5" not in joined and "L6" not in joined
 
 
+def test_blank_line_between_question_and_options_captured():
+    """Claude Code TUI inserts a blank line between the question and the
+    option block. That blank must not stop context collection."""
+    pane = (
+        "What do you want to do?\n"
+        "\n"
+        "❯ 1. Option A\n"
+        "  2. Option B\n"
+    )
+    result = detect_prompt(pane)
+    assert result is not None
+    _, preview = result
+    joined = "\n".join(preview)
+    assert "What do you want to do?" in joined
+
+
 def test_options_with_descriptions_all_captured():
     """AskUserQuestion inserts description lines between `  N. label` rows;
     block extension must tolerate that gap."""
