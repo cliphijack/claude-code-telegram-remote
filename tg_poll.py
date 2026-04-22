@@ -343,11 +343,15 @@ def tg_reply(text: str) -> None:
         log(f"⚠️ tg_reply failed: {e}")
 
 
-_RESTART_BIN_ALLOWLIST = {"claude", "claudex"}
+_RESTART_COMMANDS = {
+    "claude": "claude",
+    "claude_bypass": "claude --dangerously-skip-permissions",
+}
+_CLAUDE_PROCESS_NAMES = {"claude"}
 
 
 def _claude_tui_running(tmux_target: str) -> bool:
-    """Return True if a `claude`/`claudex` process is attached to the tmux pane's TTY.
+    """Return True if a `claude` process is attached to the tmux pane's TTY.
 
     Source-of-truth check: does not rely on scrollback text (which keeps stale
     `❯` glyphs from shell prompts / past TUI sessions and produces false positives).
@@ -371,7 +375,7 @@ def _claude_tui_running(tmux_target: str) -> bool:
                 continue
             first_token = stripped.split()[0]
             basename = os.path.basename(first_token)
-            if basename in _RESTART_BIN_ALLOWLIST:
+            if basename in _CLAUDE_PROCESS_NAMES:
                 return True
         return False
     except Exception as e:
@@ -379,21 +383,22 @@ def _claude_tui_running(tmux_target: str) -> bool:
         return False
 
 
-def handle_restart_claude(tmux_target: str, binary: str) -> None:
-    """Launch `claude` (or aliased variant) in the pane if the TUI is not running."""
-    if binary not in _RESTART_BIN_ALLOWLIST:
-        tg_reply(f"❌ 허용되지 않은 binary: {binary}")
-        log(f"🚫 /restart refused — unknown binary '{binary}'")
+def handle_restart_claude(tmux_target: str, mode: str) -> None:
+    """Launch `claude` (optionally with --dangerously-skip-permissions) in the pane."""
+    command = _RESTART_COMMANDS.get(mode)
+    if command is None:
+        tg_reply(f"❌ 허용되지 않은 restart 모드: {mode}")
+        log(f"🚫 /restart refused — unknown mode '{mode}'")
         return
     try:
         if _claude_tui_running(tmux_target):
             tg_reply("❌ Claude Code 실행 중. 먼저 /quit 로 종료해.")
             log("🚫 /restart refused — TUI still alive (process check)")
             return
-        _tmux("send-keys", "-t", tmux_target, "-l", binary)
+        _tmux("send-keys", "-t", tmux_target, "-l", command)
         _tmux("send-keys", "-t", tmux_target, "Enter")
-        tg_reply(f"✅ {binary} 재기동 요청 전송")
-        log(f"🔄 /restart → {binary} + Enter")
+        tg_reply(f"✅ {command} 재기동 요청 전송")
+        log(f"🔄 /restart → {command} + Enter")
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
         log(f"⚠️ restart failed (exit={e.returncode}): {stderr}")

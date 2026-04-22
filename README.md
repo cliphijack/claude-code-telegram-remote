@@ -170,7 +170,7 @@ ALLOWED_USER_IDS=123456789                    # 본인 user ID (콤마로 여러
 | `/compact`, `/cost`, `/agents`, `/model <n>` | Claude Code 네이티브 슬래시 |
 | `/ship`, `/review`, `/assemble` 등 | 사용자 스킬 슬래시 (자동 인식) |
 | `/clear`, `/kill`, `/quit` | 위험 — `/confirm <token>`으로 60초 내 승인 필요 |
-| `/restart [x]` | 종료된 pane에서 Claude Code 재기동 (`x`는 bypass 모드) |
+| `/restart [x]` | 종료된 pane에서 Claude Code 재기동 (`x` = `--dangerously-skip-permissions` bypass 모드) |
 | 그 외 `/...` | Claude Code TUI로 그대로 전달, 모르는 명령은 "Unknown command" |
 
 ---

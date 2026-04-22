@@ -222,10 +222,10 @@ def test_restart_default_uses_claude():
     assert r.payload == "claude"
 
 
-def test_restart_x_uses_claudex():
+def test_restart_x_uses_bypass_mode():
     r = dispatch("/restart x")
     assert r.action == "restart_claude"
-    assert r.payload == "claudex"
+    assert r.payload == "claude_bypass"
 
 
 def test_restart_unknown_arg_falls_back_to_claude():

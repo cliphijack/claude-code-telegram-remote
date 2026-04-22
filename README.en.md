@@ -170,7 +170,7 @@ From Telegram, send `/help` to your bot. If the command list comes back as a rep
 | `/compact`, `/cost`, `/agents`, `/model <n>` | Claude Code native slashes |
 | `/ship`, `/review`, `/assemble`, ... | User skill slashes (auto-detected) |
 | `/clear`, `/kill`, `/quit` | Dangerous — requires `/confirm <token>` within 60 seconds |
-| `/restart [x]` | Relaunch Claude Code in an exited pane (`x` = bypass mode) |
+| `/restart [x]` | Relaunch Claude Code in an exited pane (`x` = `--dangerously-skip-permissions` bypass mode) |
 | Any other `/...` | Forwarded verbatim to the Claude Code TUI; unknown commands return "Unknown command" |
 
 ---

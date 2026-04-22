@@ -140,7 +140,7 @@ HELP_TEXT = """Claude Code 리모컨 명령어
 
 [세션 재시작]
 /restart        → claude 재기동 (TUI 실행 중이면 거부)
-/restart x      → claudex 재기동 (bypass-on 모드)
+/restart x      → claude --dangerously-skip-permissions 재기동 (bypass 모드)
 
 [도움말]
 /help"""
@@ -246,12 +246,12 @@ def dispatch(text: str, now: float | None = None) -> CommandResult:
         return CommandResult(action="status_reply", reply_text=HELP_TEXT)
 
     # 3b. /restart [x] — re-launch Claude Code in shell (poller guards against live TUI).
-    #   /restart    → claude
-    #   /restart x  → claudex (bypass-on alias)
+    #   /restart    → "claude"
+    #   /restart x  → "claude_bypass" (poller maps to `claude --dangerously-skip-permissions`)
     if cmd == "/restart":
         variant = rest.strip().lower()
-        binary = "claudex" if variant == "x" else "claude"
-        return CommandResult(action="restart_claude", payload=binary)
+        mode = "claude_bypass" if variant == "x" else "claude"
+        return CommandResult(action="restart_claude", payload=mode)
 
     # 4. Key sequence aliases.
     if cmd in KEY_COMMANDS:
