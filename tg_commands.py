@@ -89,6 +89,20 @@ KEY_COMMANDS: dict[str, tuple[str, ...]] = {
     "/no":      ("2", "Enter"),
     "/opt3":    ("3", "Enter"),
     "/opt4":    ("4", "Enter"),
+    # Numeric shortcuts for AskUserQuestion / permission prompts.
+    # MUST inject as key events (digit + Enter), not as slash text —
+    # injecting "/2" as raw text makes the TUI treat it as a slash
+    # command and dismisses the modal with the default option.
+    "/0":       ("0", "Enter"),
+    "/1":       ("1", "Enter"),
+    "/2":       ("2", "Enter"),
+    "/3":       ("3", "Enter"),
+    "/4":       ("4", "Enter"),
+    "/5":       ("5", "Enter"),
+    "/6":       ("6", "Enter"),
+    "/7":       ("7", "Enter"),
+    "/8":       ("8", "Enter"),
+    "/9":       ("9", "Enter"),
 }
 
 # Dangerous — requires /confirm <token> within TTL.

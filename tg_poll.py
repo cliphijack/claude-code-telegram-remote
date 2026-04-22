@@ -445,6 +445,172 @@ WATCHERS = {
 }
 
 
+# --- Prompt watcher (always-on) ---
+#
+# Detects active AskUserQuestion modals and permission prompts so the user
+# gets notified on Telegram when Claude Code is waiting for input. Without
+# this, an idle remote user has no way of knowing a prompt appeared without
+# polling /screen manually.
+
+import hashlib  # noqa: E402
+import re       # noqa: E402
+
+# Cursor char Claude Code uses to mark the currently-selected option.
+# Permission prompts render "❯ 1. Yes" while AskUserQuestion renders
+# "❯ 1. A) ..." — both start with `❯ ` followed by a digit+period.
+_PROMPT_OPTION_RE = re.compile(r"^\s*[❯>]\s*(\d+)\.\s")
+_PROMPT_CONT_RE = re.compile(r"^\s*(\d+)\.\s")
+# Lines that are mostly box-drawing / divider chars — stop context scan here
+# so TUI frame lines don't pollute the notification preview.
+_DIVIDER_CHARS = set("─━═╌╍╴╶╸╺│┃┆┇┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛━╸╺")
+
+
+def _is_divider(line: str) -> bool:
+    """Only a line made mostly of box-drawing characters counts as a divider.
+
+    Blank lines are NOT dividers — Claude Code renders an empty line between
+    the question and the option block, and treating that as a stop would
+    clip the question from the notification preview.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return False
+    non_space = [c for c in stripped if not c.isspace()]
+    if not non_space:
+        return False
+    divider_count = sum(1 for c in non_space if c in _DIVIDER_CHARS)
+    return divider_count / len(non_space) >= 0.8
+
+
+def detect_prompt(pane: str) -> tuple[str, list[str]] | None:
+    """Look for an active numbered-option prompt in the pane.
+
+    Returns (hash, preview_lines) if a prompt is detected, else None.
+    `hash` is stable for the same visible prompt so repeat polls don't
+    re-notify. `preview_lines` is the context + options block to send.
+    """
+    lines = pane.splitlines()
+    # Scan from the bottom up. Active prompts sit near the bottom of the pane.
+    cursor_idx = None
+    for i in range(len(lines) - 1, -1, -1):
+        if _PROMPT_OPTION_RE.match(lines[i]):
+            cursor_idx = i
+            break
+    if cursor_idx is None:
+        return None
+
+    # Collect the full option block. AskUserQuestion often renders an indented
+    # description after each `  N. label` line, so we can't require option
+    # lines to be strictly consecutive. Allow a small gap of non-divider,
+    # non-option lines (the description) between entries.
+    MAX_GAP = 3
+
+    def _is_block_line(idx: int) -> bool:
+        return bool(
+            _PROMPT_CONT_RE.match(lines[idx])
+            or _PROMPT_OPTION_RE.match(lines[idx])
+        )
+
+    block_start = cursor_idx
+    j = cursor_idx - 1
+    gap = 0
+    while j >= 0 and gap <= MAX_GAP:
+        if _is_block_line(j):
+            block_start = j
+            gap = 0
+        elif _is_divider(lines[j]):
+            break
+        elif lines[j].strip():
+            gap += 1
+        j -= 1
+
+    block_end = cursor_idx
+    k = cursor_idx + 1
+    gap = 0
+    while k < len(lines) and gap <= MAX_GAP:
+        if _is_block_line(k):
+            block_end = k
+            gap = 0
+        elif _is_divider(lines[k]):
+            break
+        elif lines[k].strip():
+            gap += 1
+        k += 1
+
+    # Include any description lines trailing the last matched option — these
+    # sit between the last numbered line and the next blank/divider boundary.
+    k = block_end + 1
+    while k < len(lines):
+        line = lines[k]
+        if _is_divider(line) or _is_block_line(k) or not line.strip():
+            break
+        block_end = k
+        k += 1
+
+    # Context = the question text above the option block. Blank lines are
+    # skipped (Claude Code renders an empty line between question and
+    # options), but real box-drawing dividers hard-stop the scan so that
+    # unrelated TUI chrome / prior output never leaks in. Bounded search
+    # window so the scan can't run up the entire pane.
+    MAX_CTX_SCAN = 15
+    ctx_lines: list[str] = []
+    j = block_start - 1
+    stop_at = max(-1, block_start - 1 - MAX_CTX_SCAN)
+    while j > stop_at and len(ctx_lines) < 4:
+        line = lines[j].rstrip()
+        if _is_divider(line):
+            break
+        if line.strip():
+            ctx_lines.insert(0, line)
+        j -= 1
+
+    options = [lines[k].rstrip() for k in range(block_start, block_end + 1)]
+    preview = ctx_lines + options
+
+    # Hash the option block only (not context). Context can flicker across
+    # re-renders; options are the stable identity of a prompt.
+    digest_input = "\n".join(l.strip() for l in options).encode("utf-8")
+    prompt_hash = hashlib.sha256(digest_input).hexdigest()[:12]
+    return prompt_hash, preview
+
+
+def watch_prompts(tmux_target: str, interval_s: float = 3.0) -> None:
+    """Continuously watch for new prompts and push a Telegram notification.
+
+    Runs as a daemon thread for the lifetime of the poller. Same prompt is
+    never notified twice; a prompt that disappears and reappears with a
+    different option set is treated as new.
+    """
+    last_hash: str | None = None
+    log("👀 prompt watcher started")
+    while True:
+        try:
+            time.sleep(interval_s)
+            pane = _pane_text(tmux_target)
+            if not pane:
+                continue
+            result = detect_prompt(pane)
+            if result is None:
+                last_hash = None  # Prompt cleared; arm for next appearance.
+                continue
+            prompt_hash, preview = result
+            if prompt_hash == last_hash:
+                continue
+            last_hash = prompt_hash
+            body = "\n".join(preview)
+            # Cap at ~1500 chars to stay well under Telegram's 4096 limit.
+            if len(body) > 1500:
+                body = body[:1500] + "\n…(잘림)"
+            tg_reply(
+                f"🔔 Claude Code 응답 대기\n\n{body}\n\n"
+                f"응답: /1 /2 /3 … 또는 /yes /no /esc"
+            )
+        except Exception as e:
+            # Never let this thread die; just log and keep going.
+            log(f"⚠️ prompt watcher error: {e}")
+            time.sleep(interval_s)
+
+
 def start_watcher(name: str, tmux_target: str) -> None:
     fn = WATCHERS.get(name)
     if not fn:
@@ -588,6 +754,13 @@ def main() -> None:
     removed = cleanup_old_photos()
     if removed:
         log(f"🧹 cleaned {removed} stale screenshot(s) older than 7 days")
+
+    # Always-on prompt watcher — notifies Telegram when Claude Code is
+    # waiting on an AskUserQuestion or permission prompt.
+    if tmux_target:
+        threading.Thread(
+            target=watch_prompts, args=(tmux_target,), daemon=True
+        ).start()
 
     backoff = 1.0
     consecutive_failures = 0

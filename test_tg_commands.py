@@ -74,6 +74,15 @@ def test_unknown_slash_is_injected_raw():
     assert r.payload == "/totallyunknownxyz foo"
 
 
+def test_digit_slash_maps_to_key_event_not_raw_inject():
+    # /N must go through key_inject, NOT raw_inject with "/N" text.
+    # Otherwise modal prompts dismiss with the default option.
+    for n in range(10):
+        r = dispatch(f"/{n}")
+        assert r.action == "key_inject", f"/{n} should be key_inject, got {r.action}"
+        assert r.keys == (str(n), "Enter"), f"/{n} keys were {r.keys}"
+
+
 def test_plugin_namespaced_slash_injected_raw():
     # plugin:skill form (e.g. /superpowers:write-plan) must pass through.
     r = dispatch("/superpowers:write-plan")
