@@ -70,8 +70,15 @@ install_macos() {
   local template="${DEPLOY_DIR}/com.example.tg-poll.plist"
   require_file "$template"
 
+  # Pin the absolute python3 path so launchd doesn't fall back to Apple's
+  # /usr/bin/python3 which lacks Quartz (PyObjC) for window-scoped screenshots.
+  local python_bin
+  python_bin="$(command -v python3 || echo /usr/bin/python3)"
+
   mkdir -p "${HOME}/Library/LaunchAgents"
-  sed -e "s|__HOME__|${HOME}|g" -e "s|com.example.tg-poll|${label}|g" \
+  sed -e "s|__HOME__|${HOME}|g" \
+      -e "s|__PYTHON__|${python_bin}|g" \
+      -e "s|com.example.tg-poll|${label}|g" \
       "$template" > "$plist_target"
 
   # Unload any previous version so the new plist is re-read.
@@ -103,8 +110,11 @@ install_linux() {
     exit 1
   fi
 
+  local python_bin
+  python_bin="$(command -v python3 || echo /usr/bin/python3)"
+
   mkdir -p "$(dirname "$unit_target")"
-  cp "$template" "$unit_target"
+  sed -e "s|__PYTHON__|${python_bin}|g" "$template" > "$unit_target"
 
   systemctl --user daemon-reload
   systemctl --user enable --now tg-poll.service

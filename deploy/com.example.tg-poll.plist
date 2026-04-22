@@ -12,8 +12,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>python3</string>
+        <string>__PYTHON__</string>
         <string>__HOME__/.claude/channels/telegram/tg_poll.py</string>
     </array>
 

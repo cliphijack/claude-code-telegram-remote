@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env python3 %h/.claude/channels/telegram/tg_poll.py
+ExecStart=__PYTHON__ %h/.claude/channels/telegram/tg_poll.py
 WorkingDirectory=%h/.claude/channels/telegram
 Restart=on-failure
 RestartSec=5

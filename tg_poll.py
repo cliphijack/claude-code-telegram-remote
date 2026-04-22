@@ -46,11 +46,100 @@ def _resolve_tmux() -> str:
 TMUX_BIN = _resolve_tmux()
 
 
+_WINDOW_ID_HELPER = r"""
+import sys
+from Quartz import (
+    CGWindowListCopyWindowInfo,
+    kCGWindowListOptionOnScreenOnly,
+    kCGNullWindowID,
+)
+needle = sys.argv[1].lower()
+candidates = []
+for w in CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID):
+    owner = (w.get("kCGWindowOwnerName") or "").lower()
+    if owner != needle and needle not in owner:
+        continue
+    bounds = w.get("kCGWindowBounds") or {}
+    area = (bounds.get("Width", 0) or 0) * (bounds.get("Height", 0) or 0)
+    wid = w.get("kCGWindowNumber")
+    if wid is not None:
+        candidates.append((area, wid))
+candidates.sort(reverse=True)
+print(candidates[0][1] if candidates else "")
+"""
+
+
+def _resolve_window_id(app_name: str) -> int | None:
+    """Find the front on-screen window for `app_name` via Quartz.
+
+    Quartz (PyObjC) may not be importable by the Python running this poller
+    — e.g. when the service runs under `/usr/bin/python3` for TCC (Screen
+    Recording) permission reasons, and PyObjC lives in a different Python.
+    So we first try in-process import; if that fails, we fall out to any
+    other `python3` on PATH and run the helper there.
+    """
+    if not app_name:
+        return None
+    # In-process fast path.
+    try:
+        from Quartz import (  # type: ignore
+            CGWindowListCopyWindowInfo,
+            kCGWindowListOptionOnScreenOnly,
+            kCGNullWindowID,
+        )
+        wins = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+        )
+        needle = app_name.lower()
+        candidates = []
+        for w in wins:
+            owner = (w.get("kCGWindowOwnerName") or "").lower()
+            if owner != needle and needle not in owner:
+                continue
+            bounds = w.get("kCGWindowBounds") or {}
+            area = (bounds.get("Width", 0) or 0) * (bounds.get("Height", 0) or 0)
+            wid = w.get("kCGWindowNumber")
+            if wid is not None:
+                candidates.append((area, wid))
+        if candidates:
+            candidates.sort(reverse=True)
+            return int(candidates[0][1])
+        return None
+    except Exception:
+        pass
+    # Out-of-process helper: pick a python3 that's not the one running us.
+    helper_pythons = [
+        shutil.which("python3"),
+        "/Library/Frameworks/Python.framework/Versions/3.10/bin/python3",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+    ]
+    self_exe = sys.executable
+    for py in helper_pythons:
+        if not py or py == self_exe or not Path(py).exists():
+            continue
+        try:
+            proc = subprocess.run(
+                [py, "-c", _WINDOW_ID_HELPER, app_name],
+                capture_output=True, text=True, timeout=3,
+            )
+            out = (proc.stdout or "").strip()
+            if out.isdigit():
+                return int(out)
+        except Exception:
+            continue
+    return None
+
+
 # Platform-specific screenshot tool detection. macOS uses `screencapture`;
 # Linux has several options depending on display server (X11 vs Wayland).
-def _resolve_screenshot_cmd(out_path: Path) -> list[str] | None:
+def _resolve_screenshot_cmd(out_path: Path, window_id: int | None = None) -> list[str] | None:
     if sys.platform == "darwin":
         if Path("/usr/sbin/screencapture").exists():
+            if window_id is not None:
+                # `-l <id>` captures only that window. `-o` drops the shadow.
+                return ["/usr/sbin/screencapture", "-x", "-o",
+                        "-l", str(window_id), str(out_path)]
             return ["/usr/sbin/screencapture", "-x", str(out_path)]
         return None
     # Linux / BSD: try common tools in order of preference.
@@ -667,10 +756,12 @@ def start_watcher(name: str, tmux_target: str) -> None:
     log(f"👀 watcher started: {name}")
 
 
-def send_screen_png() -> None:
+def send_screen_png(terminal_app: str = "") -> None:
     out = BASE_DIR / "photos" / f"screen-{int(time.time())}.png"
     out.parent.mkdir(exist_ok=True)
-    cmd = _resolve_screenshot_cmd(out)
+    window_id = _resolve_window_id(terminal_app) if terminal_app else None
+    scope = f"window:{terminal_app}" if window_id else "fullscreen"
+    cmd = _resolve_screenshot_cmd(out, window_id=window_id)
     if cmd is None:
         msg = (
             "❌ screenshot 도구를 찾을 수 없음. "
@@ -681,10 +772,10 @@ def send_screen_png() -> None:
         return
     try:
         subprocess.run(cmd, check=True, timeout=10)
-        subprocess.run([str(TG_NOTIFY), "📸 screenshot", "--photo", str(out)],
+        subprocess.run([str(TG_NOTIFY), f"📸 screenshot ({scope})", "--photo", str(out)],
                        check=True, timeout=20)
     except Exception as e:
-        log(f"⚠️ screen_png failed: {e}")
+        log(f"⚠️ screen_png failed ({scope}): {e}")
         tg_reply(f"❌ screenshot 실패: {e}")
 
 
@@ -793,6 +884,7 @@ def main() -> None:
     env = load_env()
     token = env["TELEGRAM_BOT_TOKEN"]
     tmux_target = env.get("TMUX_TARGET", "")
+    terminal_app = env.get("TERMINAL_APP", "")
     allowed_ids = parse_allowed_ids(env)
     state = load_state()
     log(f"🚀 tg_poll started (last_update_id={state['last_update_id']}, "
@@ -867,7 +959,7 @@ def main() -> None:
                     if tmux_target:
                         send_screen_text(tmux_target, int(result.payload))
                 elif result.action == "screen_png":
-                    send_screen_png()
+                    send_screen_png(terminal_app)
                 elif result.action == "restart_claude":
                     if tmux_target:
                         handle_restart_claude(tmux_target, result.payload or "claude")
