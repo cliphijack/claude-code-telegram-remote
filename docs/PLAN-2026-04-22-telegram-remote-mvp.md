@@ -20,10 +20,10 @@
 Append to `.env`:
 
 ```
-ALLOWED_USER_IDS=7703208804
+ALLOWED_USER_IDS=123456789
 ```
 
-(Comma-separated numeric Telegram user ids. `7703208804` is the form's id, already used as `CHAT_ID` in `tg_notify.sh`.)
+(Comma-separated numeric Telegram user ids. Replace `123456789` with your own id, same value used as `CHAT_ID` in `tg_notify.sh`.)
 
 - [ ] **Step P.2: Verify tmux target is set**
 
