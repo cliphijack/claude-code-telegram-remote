@@ -140,6 +140,76 @@ uninstall_linux() {
   green "Removed tg-poll.service (systemd --user)."
 }
 
+# Register notify_stop.sh as a Claude Code Stop hook so assistant replies
+# auto-push to Telegram. Safe to call repeatedly — dedup by command path.
+install_stop_hook() {
+  local hook_src="${SCRIPT_DIR}/notify_stop.sh"
+  local settings="${HOME}/.claude/settings.json"
+  require_file "$hook_src"
+  chmod +x "$hook_src"
+
+  mkdir -p "$(dirname "$settings")"
+  python3 - "$settings" "$hook_src" <<'PY'
+import json, sys
+path, cmd = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except FileNotFoundError:
+    data = {}
+except json.JSONDecodeError:
+    print("settings.json exists but is not valid JSON; refusing to overwrite", file=sys.stderr)
+    sys.exit(1)
+hooks = data.setdefault("hooks", {})
+stop = hooks.setdefault("Stop", [])
+for entry in stop:
+    for h in entry.get("hooks", []):
+        if h.get("type") == "command" and h.get("command", "").endswith("notify_stop.sh"):
+            print("already-registered")
+            sys.exit(0)
+stop.append({"hooks": [{"type": "command", "command": cmd}]})
+with open(path, "w") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+print("registered")
+PY
+
+  green "Stop hook registered in ${settings}."
+  info  "Open the /hooks dialog once in Claude Code to reload settings."
+}
+
+uninstall_stop_hook() {
+  local settings="${HOME}/.claude/settings.json"
+  [ -f "$settings" ] || return 0
+  python3 - "$settings" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    sys.exit(0)
+hooks = data.get("hooks", {})
+stop = hooks.get("Stop", [])
+new_stop = []
+for entry in stop:
+    inner = [h for h in entry.get("hooks", [])
+             if not (h.get("type") == "command"
+                     and h.get("command", "").endswith("notify_stop.sh"))]
+    if inner:
+        entry = dict(entry, hooks=inner)
+        new_stop.append(entry)
+if stop and not new_stop:
+    hooks.pop("Stop", None)
+elif new_stop:
+    hooks["Stop"] = new_stop
+if not hooks:
+    data.pop("hooks", None)
+with open(path, "w") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+PY
+  green "Stop hook removed from ${settings}."
+}
+
 main() {
   local action="install"
   if [ "${1:-}" = "--uninstall" ]; then
@@ -156,6 +226,7 @@ main() {
   fi
 
   if [ "$action" = "uninstall" ]; then
+    uninstall_stop_hook
     case "$platform" in
       macos) uninstall_macos ;;
       linux) uninstall_linux ;;
@@ -170,6 +241,8 @@ main() {
     macos) install_macos ;;
     linux) install_linux ;;
   esac
+
+  install_stop_hook
 
   green "Done. Send /help to your bot in Telegram to verify it's running."
 }
