@@ -9,6 +9,36 @@
 - 권한 프롬프트 원격 응답 (`/yes`, `/no`, `/1`, `/2`, ...)
 - 위험 명령(`/clear`, `/kill`, `/quit`)은 60초 TTL 확인 토큰으로 보호
 - 설치된 모든 스킬(플러그인 포함 `/superpowers:write-plan` 같은 형식도) 자동 지원
+- **🆕 Claude 응답 자동 푸시** — 매 턴이 끝나면 응답이 텔레그램으로 자동 전송됨 (`/screen`·`/tail` 안 쳐도 됨)
+
+---
+
+## 이 fork에서 달라진 점 (vs [업스트림](https://github.com/etinpres/claude-code-telegram-remote))
+
+이 fork는 [etinpres/claude-code-telegram-remote](https://github.com/etinpres/claude-code-telegram-remote)에서 분기했고, 다음 세 가지가 추가/변경됐어:
+
+| | 업스트림 | 이 fork |
+|---|---|---|
+| Linux에서 자유 텍스트 주입 | ❌ `tmux not found in PATH`로 실패 | ✅ `TMUX_BIN` 변수 사용 |
+| systemd 서비스가 tmux 소켓 접근 | ❌ `PrivateTmp=true`라 막힘 | ✅ `PrivateTmp=false`로 풀어둠 |
+| Claude 응답 → 텔레그램 자동 푸시 | ❌ `/screen`/`/tail`로 풀(pull)만 | ✅ Stop hook으로 자동 푸시 |
+
+자세한 의도는 각 커밋 메시지 참고. 업스트림에 PR로 보낼 가치도 있는 변경사항들.
+
+---
+
+## 응답 자동 푸시 (`notify_stop.sh`)
+
+`install.sh`가 자동으로 Claude Code의 Stop hook으로 등록함. 동작:
+
+1. Claude Code가 응답 끝낸 시점에 Stop hook 발동
+2. `notify_stop.sh`가 transcript JSONL을 읽고 마지막 사용자 prompt 이후의 모든 assistant text 블록을 합침
+3. JSONL flush race를 피하려고 결과가 600ms 동안 안 변할 때까지 0.3초 간격으로 폴링 (최대 5초)
+4. `tg_notify.sh`로 텔레그램에 전송 (3900자에서 자름)
+
+디버깅 로그: `~/.claude/channels/telegram/notify_stop.log`
+
+> ⚠️ `~/.claude/settings.json`의 hook은 **세션 시작 시점에만** 로드됨. install 직후 활성 세션에서는 `/hooks` 슬래시 명령을 한 번 열었다 닫아야 reload됨.
 
 ---
 
