@@ -274,12 +274,12 @@ def inject_to_claude(tmux_target: str, text: str) -> bool:
     try:
         # literal 모드로 텍스트 입력 후 Enter
         subprocess.run(
-            ["/opt/homebrew/bin/tmux", "send-keys", "-t", tmux_target, "-l", prompt],
+            [TMUX_BIN, "send-keys", "-t", tmux_target, "-l", prompt],
             check=True,
             timeout=5,
         )
         subprocess.run(
-            ["/opt/homebrew/bin/tmux", "send-keys", "-t", tmux_target, "Enter"],
+            [TMUX_BIN, "send-keys", "-t", tmux_target, "Enter"],
             check=True,
             timeout=5,
         )
