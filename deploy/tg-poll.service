@@ -15,7 +15,10 @@ StandardError=append:%h/.claude/channels/telegram/systemd.err.log
 
 # Hardening
 NoNewPrivileges=true
-PrivateTmp=true
+# PrivateTmp must remain false: tmux uses a Unix socket under
+# /tmp/tmux-<uid>/, and a private /tmp namespace prevents the poller
+# from reaching it (`error connecting to /tmp/tmux-1000/default`).
+PrivateTmp=false
 ProtectSystem=strict
 ReadWritePaths=%h/.claude/channels/telegram
 
