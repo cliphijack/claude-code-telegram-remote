@@ -113,6 +113,9 @@ DANGEROUS_KEY_SEQS: dict[str, tuple[str, ...]] = {
     "/quit": ("C-c", "sleep:0.3", "C-c"),
 }
 
+# Natural language restart trigger — bypass mode only when user says this phrase.
+_NATURAL_RESTART_RE = re.compile(r"세션\s*재시작해", re.IGNORECASE)
+
 HELP_TEXT = """Claude Code 리모컨 명령어
 
 [슬래시 - CLI에 그대로 전달]
@@ -141,6 +144,7 @@ HELP_TEXT = """Claude Code 리모컨 명령어
 [세션 재시작]
 /restart        → claude 재기동 (TUI 실행 중이면 거부)
 /restart x      → claude --dangerously-skip-permissions 재기동 (bypass 모드)
+세션 재시작해   → bypass 모드 재시작 (자연어 트리거)
 
 [도움말]
 /help"""
@@ -188,6 +192,11 @@ def _consume_pending(token: str, now: float) -> str | None:
 def dispatch(text: str, now: float | None = None) -> CommandResult:
     """Classify inbound Telegram text into an action for the poller."""
     text = (text or "").strip()
+
+    # Natural language triggers — checked before slash routing.
+    if _NATURAL_RESTART_RE.search(text):
+        return CommandResult(action="restart_claude", payload="claude_bypass")
+
     if not text or not text.startswith("/"):
         return CommandResult(action="fallback_prefix", payload=text)
 

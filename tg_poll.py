@@ -383,6 +383,17 @@ def _claude_tui_running(tmux_target: str) -> bool:
         return False
 
 
+_POST_RESTART_DELAY = 15.0  # seconds to wait before injecting memory prompt
+_POST_RESTART_PROMPT = "메모리 읽어줘"  # injected after restart to load memories
+
+
+def _post_restart_inject(tmux_target: str) -> None:
+    """Wait for Claude to initialize, then inject a memory-read prompt."""
+    time.sleep(_POST_RESTART_DELAY)
+    inject_to_claude(tmux_target, _POST_RESTART_PROMPT)
+    log("💾 post-restart memory prompt injected")
+
+
 def handle_restart_claude(tmux_target: str, mode: str) -> None:
     """Launch `claude` (optionally with --dangerously-skip-permissions) in the pane."""
     command = _RESTART_COMMANDS.get(mode)
@@ -399,6 +410,7 @@ def handle_restart_claude(tmux_target: str, mode: str) -> None:
         _tmux("send-keys", "-t", tmux_target, "Enter")
         tg_reply(f"✅ {command} 재기동 요청 전송")
         log(f"🔄 /restart → {command} + Enter")
+        threading.Thread(target=_post_restart_inject, args=(tmux_target,), daemon=True).start()
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
         log(f"⚠️ restart failed (exit={e.returncode}): {stderr}")
