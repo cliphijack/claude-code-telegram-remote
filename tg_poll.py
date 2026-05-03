@@ -820,6 +820,33 @@ def download_photo(token: str, file_id: str) -> str | None:
         return None
 
 
+def download_document(token: str, file_id: str, file_name: str = "") -> str | None:
+    """Telegram getFile API로 문서 파일 다운로드, 로컬 경로 반환."""
+    docs_dir = BASE_DIR / "documents"
+    docs_dir.mkdir(exist_ok=True)
+    try:
+        url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if not data.get("ok"):
+            return None
+        file_path = data["result"]["file_path"]
+        dl_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+        if file_name:
+            local_name = f"{int(time.time())}-{file_name}"
+        else:
+            ext = Path(file_path).suffix or ""
+            local_name = f"{file_id[:20]}{ext}"
+        local_path = docs_dir / local_name
+        urllib.request.urlretrieve(dl_url, str(local_path))
+        log(f"📄 document saved: {local_path}")
+        return str(local_path)
+    except Exception as e:
+        log(f"⚠️ document download failed: {e}")
+        return None
+
+
 def load_state() -> dict:
     if STATE_FILE.exists():
         try:
@@ -940,6 +967,7 @@ def main() -> None:
                 msg = u.get("message") or u.get("edited_message") or {}
                 text = msg.get("text") or msg.get("caption") or ""
                 photos = msg.get("photo")
+                document = msg.get("document")
 
                 # Photos still flow through the legacy prefixed path.
                 photo_paths: list[str] = []
@@ -955,6 +983,17 @@ def main() -> None:
                         parts.append(text)
                     inject_to_claude(tmux_target, " ".join(parts))
                     continue
+
+                # Document files (CSV, ZIP, PDF 등) — 20MB 이하만 가능
+                if document and tmux_target:
+                    file_name = document.get("file_name", "")
+                    local = download_document(token, document["file_id"], file_name)
+                    if local:
+                        parts = [f"[파일: {local}]"]
+                        if text:
+                            parts.append(text)
+                        inject_to_claude(tmux_target, " ".join(parts))
+                        continue
 
                 if not text:
                     continue
