@@ -22,6 +22,7 @@
 | Linux에서 자유 텍스트 주입 | ❌ `tmux not found in PATH`로 실패 | ✅ `TMUX_BIN` 변수 사용 |
 | systemd 서비스가 tmux 소켓 접근 | ❌ `PrivateTmp=true`라 막힘 | ✅ `PrivateTmp=false`로 풀어둠 |
 | Claude 응답 → 텔레그램 자동 푸시 | ❌ `/screen`/`/tail`로 풀(pull)만 | ✅ Stop hook으로 자동 푸시 |
+| 멀티 팀원 구조 | ❌ 단일 봇만 | ✅ 팀원별 봇 + `CLAUDE.md`로 성격 정의 |
 
 자세한 의도는 각 커밋 메시지 참고. 업스트림에 PR로 보낼 가치도 있는 변경사항들.
 
@@ -299,6 +300,93 @@ install.sh가 `command -v python3` 결과를 plist에 박기 때문에 Homebrew 
 ```
 
 `.env`와 로그는 남음. 완전히 지우려면 `rm -rf ~/.claude/channels/telegram`.
+
+---
+
+## 멀티 팀원 구조 (Multi-Agent)
+
+Claude 세션 하나 = 팀원 하나. 각 팀원이 독립된 텔레그램 봇과 tmux 세션을 가진다.
+
+```
+텔레그램 그룹방
+  ├── 메인 봇 (나) ────→ tmux cc:0 (Claude Code 메인)
+  ├── team1 봇 ─────→ tmux team1:0 (역할별 Claude)
+  └── team2 봇 ─────→ tmux team2:0 (역할별 Claude)
+```
+
+### 팀원 추가 방법
+
+**1. 봇 생성**
+BotFather에서 새 봇 토큰 발급.
+
+**2. 팀원 디렉토리 구조**
+```
+~/team1/
+  ├── CLAUDE.md          # 팀원 성격·역할 정의
+  ├── start.sh           # 원클릭 세션 시작
+  └── telegram/
+       ├── .env          # 팀원 봇 토큰 + TMUX_TARGET
+       ├── tg_poll.py    # 이 repo에서 복사
+       └── tg_notify.sh  # 이 repo에서 복사
+```
+
+**3. `.env` 설정**
+```bash
+TELEGRAM_BOT_TOKEN=<팀원 봇 토큰>
+TELEGRAM_CHAT_ID=<채팅 ID>
+TMUX_TARGET=team1:0.0
+ALLOWED_USER_IDS=<허용할 유저 ID>
+```
+
+**4. `CLAUDE.md` 작성 — 팀원 성격 정의**
+```markdown
+# Team1 — 긍정적인 해결사
+어떤 문제가 와도 "일단 해보자"가 출발점이다.
+막히면 우회로를 찾고, 안 되면 다른 방법을 제안한다.
+
+## 역할
+- 막힌 문제 뚫기
+- 대안 제시
+```
+
+**5. `start.sh` — 원클릭 세션 시작**
+```bash
+#!/bin/bash
+# 미수신 메시지 스킵 (재시작 시 자동 주입 방지)
+python3 -c "
+import urllib.request, json, pathlib
+token = [l.split('=',1)[1].strip() for l in open('telegram/.env').read().splitlines() if l.startswith('TELEGRAM_BOT_TOKEN')][0]
+data = json.loads(urllib.request.urlopen(f'https://api.telegram.org/bot{token}/getUpdates?offset=-1&limit=1', timeout=5).read())
+updates = data.get('result', [])
+if updates:
+    state = {'last_update_id': updates[-1]['update_id']}
+    pathlib.Path('telegram/state.json').write_text(json.dumps(state))
+"
+
+tmux kill-session -t team1 2>/dev/null
+tmux new-session -d -s team1 -c ~/team1
+tmux send-keys -t team1:0 'claude' Enter
+tmux new-window -t team1 -c ~/team1/telegram
+tmux send-keys -t team1:1 'python3 tg_poll.py' Enter
+tmux select-window -t team1:0
+tmux attach -t team1
+```
+
+**6. 자동 응답 라우팅 (Stop hook)**
+
+`notify_stop.sh`를 팀원 수만큼 복사하고, `transcript_path`로 분기:
+
+```bash
+# notify_stop_main.sh (라우터)
+TPATH=$(printf '%s' "$INPUT" | grep -o '"transcript_path":"[^"]*"' || true)
+if [[ "$TPATH" == *-team1* ]]; then
+    exec ~/team1/telegram/notify_stop.sh
+else
+    exec ~/.claude/channels/telegram/notify_stop.sh
+fi
+```
+
+각 팀원의 `notify_stop.sh`는 해당 팀원의 `tg_notify.sh`를 호출하도록 경로만 수정.
 
 ---
 
