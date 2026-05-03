@@ -924,15 +924,28 @@ def extract_summary(update: dict) -> str:
     return f"{who}: {text[:80]}"
 
 
+def save_chat_id(chat_id_file: str, chat_id: str) -> None:
+    if not chat_id_file or not chat_id:
+        return
+    try:
+        Path(chat_id_file).write_text(chat_id)
+    except Exception as e:
+        log(f"⚠️ save_chat_id failed: {e}")
+
+
 def main() -> None:
     env = load_env()
     token = env["TELEGRAM_BOT_TOKEN"]
     tmux_target = env.get("TMUX_TARGET", "")
     terminal_app = env.get("TERMINAL_APP", "")
     allowed_ids = parse_allowed_ids(env)
+    bot_username = env.get("BOT_USERNAME", "").strip().lstrip("@")
+    group_mention_only = env.get("GROUP_MENTION_ONLY", "false").strip().lower() == "true"
+    chat_id_file = env.get("CHAT_ID_FILE", "").strip()
     state = load_state()
     log(f"🚀 tg_poll started (last_update_id={state['last_update_id']}, "
-        f"tmux={tmux_target or 'OFF'}, allowlist={len(allowed_ids)} ids)")
+        f"tmux={tmux_target or 'OFF'}, allowlist={len(allowed_ids)} ids, "
+        f"bot=@{bot_username or 'N/A'}, group_mention_only={group_mention_only})")
     removed = cleanup_old_photos()
     if removed:
         log(f"🧹 cleaned {removed} stale screenshot(s) older than 7 days")
@@ -965,9 +978,22 @@ def main() -> None:
                     continue
 
                 msg = u.get("message") or u.get("edited_message") or {}
+                chat_obj = msg.get("chat", {}) or {}
+                current_chat_id = str(chat_obj.get("id", ""))
+                chat_type = chat_obj.get("type", "private")
+                is_group = chat_type in ("group", "supergroup")
+
                 text = msg.get("text") or msg.get("caption") or ""
                 photos = msg.get("photo")
                 document = msg.get("document")
+
+                # @mention filter: group messages require @bot_username
+                if is_group and group_mention_only and bot_username:
+                    mention = f"@{bot_username}"
+                    if mention.lower() not in text.lower():
+                        log(f"⏭️  group msg no @{bot_username} — skip")
+                        continue
+                    text = re.sub(re.escape(mention), "", text, flags=re.IGNORECASE).strip()
 
                 # Photos still flow through the legacy prefixed path.
                 photo_paths: list[str] = []
@@ -981,6 +1007,7 @@ def main() -> None:
                     parts = [f"[이미지: {p}]" for p in photo_paths]
                     if text:
                         parts.append(text)
+                    save_chat_id(chat_id_file, current_chat_id)
                     inject_to_claude(tmux_target, " ".join(parts))
                     continue
 
@@ -992,6 +1019,7 @@ def main() -> None:
                         parts = [f"[파일: {local}]"]
                         if text:
                             parts.append(text)
+                        save_chat_id(chat_id_file, current_chat_id)
                         inject_to_claude(tmux_target, " ".join(parts))
                         continue
 
@@ -1002,6 +1030,7 @@ def main() -> None:
 
                 if result.action == "fallback_prefix":
                     if tmux_target:
+                        save_chat_id(chat_id_file, current_chat_id)
                         inject_to_claude(tmux_target, result.payload)
                 elif result.action == "raw_inject":
                     if tmux_target and send_raw_slash(tmux_target, result.payload):
