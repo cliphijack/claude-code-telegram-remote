@@ -23,6 +23,9 @@
 | systemd 서비스가 tmux 소켓 접근 | ❌ `PrivateTmp=true`라 막힘 | ✅ `PrivateTmp=false`로 풀어둠 |
 | Claude 응답 → 텔레그램 자동 푸시 | ❌ `/screen`/`/tail`로 풀(pull)만 | ✅ Stop hook으로 자동 푸시 |
 | 멀티 팀원 구조 | ❌ 단일 봇만 | ✅ 팀원별 봇 + `CLAUDE.md`로 성격 정의 |
+| 그룹방 @멘션 필터 | ❌ 없음 | ✅ `GROUP_MENTION_ONLY=true/false` — 봇별 독립 설정 |
+| 동적 chat_id 라우팅 | ❌ .env 고정값만 | ✅ 메시지 온 채팅(그룹/1:1)으로 자동 응답 라우팅 |
+| 그룹방 단독 운영 모드 | ❌ 없음 | ✅ `GROUP_MENTION_ONLY=false` + 기본 chat_id를 그룹방으로 설정 |
 
 자세한 의도는 각 커밋 메시지 참고. 업스트림에 PR로 보낼 가치도 있는 변경사항들.
 
@@ -332,11 +335,20 @@ BotFather에서 새 봇 토큰 발급.
 
 **3. `.env` 설정**
 ```bash
-TELEGRAM_BOT_TOKEN=<팀원 봇 토큰>
-TELEGRAM_CHAT_ID=<채팅 ID>
+TELEGRAM_BOT_TOKEN=<봇 토큰>
+TELEGRAM_CHAT_ID=<기본 응답 chat_id — 그룹방 단독 운영 시 그룹방 ID>
 TMUX_TARGET=team1:0.0
 ALLOWED_USER_IDS=<허용할 유저 ID>
+GROUP_CHAT_ID=<그룹방 chat_id>
+BOT_USERNAME=<봇 username (@ 제외)>
+GROUP_MENTION_ONLY=true   # true: 그룹방에서 @멘션 있을 때만 수신 / false: 모든 메시지 수신
+CHAT_ID_FILE=<chat_id 저장 파일 경로>  # 동적 라우팅용
 ```
+
+**그룹방 단독 운영 모드** (1:1 채팅 없이 그룹방에서만 대화):
+- `TELEGRAM_CHAT_ID` = 그룹방 ID
+- `GROUP_MENTION_ONLY=false` (메인봇) / `true` (팀원봇 — @멘션으로 구분)
+- 응답이 메시지 온 채팅으로 자동 라우팅됨 (`CHAT_ID_FILE` 기반)
 
 **4. `CLAUDE.md` 작성 — 팀원 성격 정의**
 ```markdown
