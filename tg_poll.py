@@ -995,6 +995,15 @@ def main() -> None:
                         continue
                     text = re.sub(re.escape(mention), "", text, flags=re.IGNORECASE).strip()
 
+                # 다른 봇 @멘션 메시지는 무시 (GROUP_MENTION_ONLY=false일 때도)
+                if is_group and not group_mention_only:
+                    other_bot_mention = re.search(r"@\w+bot\b", text, re.IGNORECASE)
+                    if other_bot_mention:
+                        mentioned = other_bot_mention.group(0).lower()
+                        if bot_username and mentioned != f"@{bot_username}".lower():
+                            log(f"⏭️  group msg mentions other bot {mentioned} — skip")
+                            continue
+
                 # Photos still flow through the legacy prefixed path.
                 photo_paths: list[str] = []
                 if photos and tmux_target:
